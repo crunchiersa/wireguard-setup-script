@@ -40,8 +40,8 @@ create_server_config () {
         echo "Address = "$iprange"1/32" >> /etc/wireguard/wg$nos.conf
         echo "PrivateKey = $(cat /etc/wireguard/server_private_key_wg$nos)" >> /etc/wireguard/wg$nos.conf
         echo "ListenPort = "$servport"" >> /etc/wireguard/wg"$nos".conf
-        echo "PostUp = iptables -t nat -A POSTROUTING -o ens192 -j MASQUERADE" >> /etc/wireguard/wg$nos.conf
-        echo "PostDown = iptables -t nat -D POSTROUTING -o ens192 -j MASQUERADE" >> /etc/wireguard/wg$nos.conf
+        echo "PostUp = iptables -t nat -A POSTROUTING -o $dev -j MASQUERADE" >> /etc/wireguard/wg$nos.conf
+        echo "PostDown = iptables -t nat -D POSTROUTING -o $dev -j MASQUERADE" >> /etc/wireguard/wg$nos.conf
 }
 
 create_server () {

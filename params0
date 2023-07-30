@@ -2,3 +2,4 @@ dnsserver="XX.XX.XX.XX"
 endpoint="example.com:51820"
 iprange="XX.XX.XX."
 servport="51820"
+dev=`ip -o -4 route show to default | awk '{print $5}'` 
