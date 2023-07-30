@@ -1,0 +1,194 @@
+#!/bin/bash
+##create_wireguard_config - Script to create wireguard server and client configs and update existing server configs when adding new client configs.
+## Parameters: The following parameters can be passed:
+## c - number of configs to be created - only relevant when mode = client
+## m - mode, determine whether a client or server config should be created.
+## q - whether or not a QR-Code should be displayed for the created client configs - only relevant when mode = client
+## n - number of server - determines the number to be put behind "wg" - also relevant for info for which instance the new client is to be configured. The next available ip needs to be filled into the nextip-config file
+
+#######################
+## general functions ##
+#######################
+
+check_root () {
+if [ "$(id -u)" != "0" ]; then
+        echo "This script must be run as root" 1>&2
+        exit 1
+fi
+}
+
+check_prereq () {
+    if ! [ -x "$(command -v /usr/bin/wg)" ]; then
+        sudo apt-get update && sudo apt-get install wireguard
+    fi
+
+    if ! [ -x "$(command -v /usr/bin/qrencode)" ]; then
+        sudo apt-get update && sudo apt-get install qrencode
+    fi
+}
+
+######################
+## Server functions ##
+######################
+
+create_server_key () {
+    /usr/bin/wg genkey | tee /etc/wireguard/server_private_key_wg$nos | /usr/bin/wg pubkey > /etc/wireguard/server_public_key_wg$nos
+}
+
+create_server_config () {
+        echo "[Interface]" >> /etc/wireguard/wg$nos.conf
+        echo "Address = "$iprange"1/32" >> /etc/wireguard/wg$nos.conf
+        echo "PrivateKey = $(cat /etc/wireguard/server_private_key_wg$nos)" >> /etc/wireguard/wg$nos.conf
+        echo "ListenPort = "$servport"" >> /etc/wireguard/wg"$nos".conf
+        echo "PostUp = iptables -t nat -A POSTROUTING -o ens192 -j MASQUERADE" >> /etc/wireguard/wg$nos.conf
+        echo "PostDown = iptables -t nat -D POSTROUTING -o ens192 -j MASQUERADE" >> /etc/wireguard/wg$nos.conf
+}
+
+create_server () {
+    create_server_key
+    create_server_config
+}
+
+######################
+## client functions ##
+######################
+
+create_client_key () {
+        /usr/bin/wg genkey | tee /etc/wireguard/configs/client_private_key_$1 | /usr/bin/wg pubkey > /etc/wireguard/configs/client_public_key_$1
+}
+
+create_psk () {
+        /usr/bin/wg genpsk
+}
+
+create_client_config () {
+        echo "[Interface]" >> /etc/wireguard/configs/config_wg"$nos"_"$1".conf
+        echo "Address = $iprange$fip/32" >> /etc/wireguard/configs/config_wg"$nos"_"$1".conf
+        echo "PrivateKey = $(cat /etc/wireguard/configs/client_private_key_$1)" >> /etc/wireguard/configs/config_wg"$nos"_"$1".conf
+        echo "DNS = $dnsserver" >> /etc/wireguard/configs/config_wg"$nos"_"$1".conf
+        echo " " >> /etc/wireguard/configs/config_wg"$nos"_"$1".conf
+        echo "[Peer]" >> /etc/wireguard/configs/config_wg"$nos"_"$1".conf
+        echo "PublicKey = $(cat /etc/wireguard/server_public_key_wg"$nos")" >> /etc/wireguard/configs/config_wg"$nos"_"$1".conf
+        echo "Endpoint = $endpoint" >> /etc/wireguard/configs/config_wg"$nos"_"$1".conf
+        echo "AllowedIPs = 0.0.0.0/0" >> /etc/wireguard/configs/config_wg"$nos"_"$1".conf
+        echo "PersistentKeepalive = 20" >> /etc/wireguard/configs/config_wg"$nos"_"$1".conf
+        echo "PresharedKey = $psk" >> /etc/wireguard/configs/config_wg"$nos"_"$1".conf
+}
+
+update_server_config () {
+        cp /etc/wireguard/wg0.conf /etc/wireguard/conf-backup/wg$nos.conf.backup_$datum
+        echo " " >> /etc/wireguard/wg$nos.conf
+        echo "[Peer]" >> /etc/wireguard/wg$nos.conf
+        echo "PublicKey = $(cat /etc/wireguard/configs/client_public_key_$1)" >> /etc/wireguard/wg$nos.conf
+        echo "AllowedIPs = "$iprange""$fip"/32 # INSERT CORRECT NAME" >> /etc/wireguard/wg$nos.conf
+        echo "PresharedKey = $psk" >> /etc/wireguard/wg$nos.conf
+}
+
+remove_keyfiles () {
+        rm /etc/wireguard/configs/client_private_key_$1
+        rm /etc/wireguard/configs/client_public_key_$1
+}
+
+restart_wireguard () {
+        /usr/bin/wg-quick down /etc/wireguard/wg$nos.conf
+        /usr/bin/wg-quick up /etc/wireguard/wg$nos.conf
+}
+
+###############
+## Execution ##
+###############
+
+check_root
+check_prereq
+# Global variables
+datum=$(date +%Y-%m-%d_%H-%M)               ## current date and time.
+re='^[0-9]+$'                               ## Variable for checking if something is a number.
+restartneeded=0
+#source /etc/wireguard/nextip$nos                ## GET next available IP, only relevant for client configs. Server IP is always 1
+#source /etc/wireguard/params$nos            ## Read certain parameters for config.
+usage=$'Parameter:
+m = mode (whether a server or client config is to be created),
+c = number of configs (relevant for client configs only),
+n = number of server - which wireguard instance should be configured, or for which instance should a client be added,
+q = mobile (whether client config should be displayed as a QR-code).'
+
+# Check if at least one parameter of some kind was passed, if not echo list of parameters and exit.
+if [ ! $# == 0 ]; then
+## GET PARAMETERS AND PUT INTO AN ARRAY
+    while getopts ":hc:m:q:n:" opt; do
+        case $opt in
+            c)      count=("$OPTARG")
+                    ;;
+            m)      modus=("$OPTARG")
+                    ;;
+            q)      param2=("$OPTARG")
+                    ;;
+            n)      nos=("$OPTARG")
+                    ;;
+            h | *)  echo $usage
+                    exit 0
+                    ;;
+        esac
+    done
+    shift $((OPTIND -1))
+    if [ -z $count ]; then
+        count=1
+    fi
+else
+    echo "$usage"
+    exit 0
+fi
+
+source /etc/wireguard/nextip$nos                ## GET next available IP, only relevant for client configs. Server IP is always 1
+source /etc/wireguard/params$nos            ## Read certain parameters for config.
+
+# check whether a valid mode has been passed.
+if [ $modus == "server" ]; then
+    create_server
+    restartneeded=1
+elif [ $modus == "client" ]; then
+    i=0
+    while [ $i -lt $count ]
+    do
+        create_client_key $fip
+        psk=$(create_psk)
+        create_client_config $fip $psk
+        update_server_config $fip $psk
+        remove_keyfiles $fip
+        if [ $param2 == "mobile" ]; then
+            echo "Config $(( $fip ))"
+            qrencode -t ansiutf8 < /etc/wireguard/configs/config_wg"$nos"_"$fip".conf
+        else
+            echo "###########################Config $(( $fip ))###########################"
+            echo "##########################################################################"
+            echo "$(cat /etc/wireguard/configs/config_wg"$nos"_"$fip".conf)"
+            echo "##########################################################################"
+            echo "##########################################################################"
+        fi
+        i=$(( $i + 1 ))
+        fip=$(( $fip + 1 ))
+    done
+    restartneeded=1
+else
+    echo "Mode \""$modus"\" is not a valid mode. Please pass a valid mode."
+    exit 0
+fi
+
+# write current ip back to parameter file, if client configs have been created.
+if [ $modus == "client" ]; then
+    echo "fip=$fip" > /etc/wireguard/nextip$nos
+fi
+
+# change ownership of files to wireguard group if group is active
+if grep -q wireguard /etc/group; then
+    chown -R root:wireguard /etc/wireguard
+else
+    chown -R root:root /etc/wireguard
+fi
+
+# restart wireguard if changes have been made.
+if [ $restartneeded == 1 ]; then
+    restart_wireguard
+fi
+
+exit 0

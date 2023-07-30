@@ -1,0 +1,4 @@
+dnsserver="XX.XX.XX.XX"
+endpoint="example.com:51820"
+iprange="XX.XX.XX."
+servport="51820"

@@ -1,0 +1,5 @@
+if [ -z $1 ]; then
+    echo "I need a path to know what to show"
+else
+    qrencode -t ansiutf8 < $1
+fi
